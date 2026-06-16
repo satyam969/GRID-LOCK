@@ -1,0 +1,43 @@
+# Core
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+python-dotenv==1.0.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Database
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+alembic==1.14.0
+
+# Computer Vision & AI
+ultralytics==8.3.55
+opencv-python-headless==4.10.0.84
+Pillow==11.0.0
+numpy==1.26.4
+torch==2.5.1
+torchvision==0.20.1
+onnx==1.17.0
+onnxruntime==1.20.1
+
+# OCR
+easyocr==1.7.2
+
+# Image enhancement
+scikit-image==0.24.0
+
+# Utilities
+aiofiles==24.1.0
+httpx==0.28.1
+requests==2.32.3
+
+# Analytics & Reporting
+pandas==2.2.3
+matplotlib==3.9.4
+reportlab==4.2.5
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

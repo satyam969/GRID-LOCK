@@ -1,0 +1,64 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# PyTest
+.pytest_cache/
+*.log
+
+# Environment
+.env
+!.env.example
+
+# Database
+*.db
+*.sqlite3
+
+# Model weights (large files – store via DVC or separately)
+backend/models_weights/*.pt
+# Keep root weights that are pre-downloaded
+!yolov8m.pt
+!yolov8m-pose.pt
+
+# Uploads & annotated evidence (runtime data)
+backend/uploads/*
+backend/annotated/*
+!backend/uploads/.gitkeep
+!backend/annotated/.gitkeep
+backend/sample_images/*
+!backend/sample_images/.gitkeep
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Install log
+install_log.txt
+*.onnx
+*.pt
+!backend/models_weights/helmet_best.pt
+!backend/models_weights/seatbelt_best.pt
+!backend/models_weights/plate_best.pt

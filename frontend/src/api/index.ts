@@ -1,0 +1,142 @@
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: '/api/v1',
+  timeout: 300_000, // 5 min for large batch uploads or slow CPU inference
+})
+
+export interface AnalysisResult {
+  violations: DetectedViolation[]
+  vehicle_type: string
+  license_plate?: string
+  plate_confidence?: number
+  person_count?: number
+  all_detections: BoundingBox[]
+  annotated_image_url?: string
+  inference_time_ms: number
+  violation_count: number
+}
+
+export interface DetectedViolation {
+  violation_type: string
+  confidence: number
+  severity: string
+  description: string
+  bbox?: BoundingBox
+}
+
+export interface BoundingBox {
+  x1: number; y1: number; x2: number; y2: number
+  confidence: number; class_name: string; class_id: number
+}
+
+export interface ViolationRecord {
+  id: string
+  timestamp: string
+  violation_type: string
+  violation_types?: string[]
+  confidence: number
+  severity: string
+  vehicle_type: string
+  license_plate?: string
+  plate_confidence?: number
+  original_image_path?: string
+  annotated_image_path?: string
+  camera_id?: string
+  location?: string
+  status: string
+  inference_time_ms?: number
+  person_count?: number
+}
+
+export interface PaginatedViolations {
+  items: ViolationRecord[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export interface AnalyticsSummary {
+  total_violations: number
+  today_violations: number
+  pending_review: number
+  top_violations: { violation_type: string; count: number; percentage: number }[]
+  vehicle_distribution: Record<string, number>
+  avg_confidence: number
+}
+
+// ── Analysis ─────────────────────────────────────────────────────────────────
+
+export const analyzeImage = async (
+  file: File,
+  options?: { enhance_contrast?: boolean; check_stop_line?: boolean; camera_id?: string }
+): Promise<AnalysisResult> => {
+  const form = new FormData()
+  form.append('file', file)
+  if (options?.enhance_contrast !== undefined) form.append('enhance_contrast', String(options.enhance_contrast))
+  if (options?.check_stop_line !== undefined) form.append('check_stop_line', String(options.check_stop_line))
+  if (options?.camera_id) form.append('camera_id', options.camera_id)
+  const { data } = await api.post<AnalysisResult>('/analyze/image', form)
+  return data
+}
+
+export const analyzeBatch = async (files: File[]): Promise<any> => {
+  const form = new FormData()
+  files.forEach(f => form.append('files', f))
+  const { data } = await api.post('/analyze/batch', form)
+  return data
+}
+
+// ── Violations ────────────────────────────────────────────────────────────────
+
+export const fetchViolations = async (params?: {
+  page?: number; page_size?: number; violation_type?: string
+  status?: string; license_plate?: string
+}): Promise<PaginatedViolations> => {
+  const { data } = await api.get('/violations', { params })
+  return data
+}
+
+export const fetchViolation = async (id: string): Promise<ViolationRecord> => {
+  const { data } = await api.get(`/violations/${id}`)
+  return data
+}
+
+export const updateViolation = async (id: string, update: { status?: string; notes?: string }) => {
+  const { data } = await api.patch(`/violations/${id}`, update)
+  return data
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+export const fetchSummary = async (): Promise<AnalyticsSummary> => {
+  const { data } = await api.get('/analytics/summary')
+  return data
+}
+
+export const fetchTrends = async (days = 7) => {
+  const { data } = await api.get('/analytics/trends', { params: { days } })
+  return data
+}
+
+export const fetchByType = async () => {
+  const { data } = await api.get('/analytics/by-type')
+  return data
+}
+
+export const fetchMetrics = async () => {
+  const { data } = await api.get('/analytics/metrics')
+  return data
+}
+
+export const fetchHealth = async () => {
+  const { data } = await axios.get('/health')
+  return data
+}
+
+export const downloadCSV = () => {
+  window.open('/api/v1/analytics/export/csv', '_blank')
+}
+
+export default api

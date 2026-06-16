@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trafficguard-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/models_weights
+      - backend-uploads:/app/uploads
+      - backend-annotated:/app/annotated
+      - ./backend/trafficguard.db:/app/trafficguard.db
+    environment:
+      - APP_NAME=TrafficGuard AI
+      - DEBUG=true
+      - DATABASE_URL=sqlite+aiosqlite:////app/trafficguard.db
+      - CORS_ORIGINS=["*"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trafficguard-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  backend-uploads:
+  backend-annotated:
