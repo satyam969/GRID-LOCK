@@ -31,7 +31,7 @@ export interface BoundingBox {
 }
 
 export interface ViolationRecord {
-  id: string
+  id: number
   timestamp: string
   violation_type: string
   violation_types?: string[]
@@ -61,6 +61,7 @@ export interface AnalyticsSummary {
   total_violations: number
   today_violations: number
   pending_review: number
+  resolution_rate: number
   top_violations: { violation_type: string; count: number; percentage: number }[]
   vehicle_distribution: Record<string, number>
   avg_confidence: number
@@ -98,12 +99,12 @@ export const fetchViolations = async (params?: {
   return data
 }
 
-export const fetchViolation = async (id: string): Promise<ViolationRecord> => {
+export const fetchViolation = async (id: number): Promise<ViolationRecord> => {
   const { data } = await api.get(`/violations/${id}`)
   return data
 }
 
-export const updateViolation = async (id: string, update: { status?: string; notes?: string }) => {
+export const updateViolation = async (id: number, update: { status?: string; notes?: string }) => {
   const { data } = await api.patch(`/violations/${id}`, update)
   return data
 }
@@ -137,6 +138,78 @@ export const fetchHealth = async () => {
 
 export const downloadCSV = () => {
   window.open('/api/v1/analytics/export/csv', '_blank')
+}
+
+// ── Vehicles ──────────────────────────────────────────────────────────────────
+
+export const searchVehicles = async (plate: string) => {
+  const { data } = await api.get('/vehicles/search', { params: { plate } })
+  return data
+}
+
+export const fetchVehicle = async (id: number) => {
+  const { data } = await api.get(`/vehicles/${id}`)
+  return data
+}
+
+export const fetchVehicleViolations = async (id: number) => {
+  const { data } = await api.get(`/vehicles/${id}/violations`)
+  return data
+}
+
+// ── Challans ──────────────────────────────────────────────────────────────────
+
+export const fetchChallans = async (status?: string) => {
+  const { data } = await api.get('/challans', { params: { status } })
+  return data
+}
+
+export const generateChallan = async (violationId: number) => {
+  const { data } = await api.post('/challans/generate', { violation_id: violationId })
+  return data
+}
+
+export const payChallan = async (challanId: number) => {
+  const { data } = await api.put(`/challans/${challanId}/pay`)
+  return data
+}
+
+// ── Cameras ───────────────────────────────────────────────────────────────────
+
+export const fetchCameras = async () => {
+  const { data } = await api.get('/cameras')
+  return data
+}
+
+export const createCamera = async (payload: any) => {
+  const { data } = await api.post('/cameras', payload)
+  return data
+}
+
+export const updateCamera = async (id: number, payload: any) => {
+  const { data } = await api.put(`/cameras/${id}`, payload)
+  return data
+}
+
+export const deleteCamera = async (id: number) => {
+  const { data } = await api.delete(`/cameras/${id}`)
+  return data
+}
+
+// ── Settings & Reports ────────────────────────────────────────────────────────
+
+export const fetchSettings = async () => {
+  const { data } = await api.get('/settings')
+  return data
+}
+
+export const updateSettings = async (payload: any) => {
+  const { data } = await api.put('/settings', payload)
+  return data
+}
+
+export const generateReport = (type: string) => {
+  window.open(`http://127.0.0.1:8000/api/v1/reports/generate?type=${type}`, '_blank')
 }
 
 export default api

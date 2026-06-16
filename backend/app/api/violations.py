@@ -60,7 +60,7 @@ async def list_violations(
 
 
 @router.get("/{violation_id}", response_model=ViolationResponse)
-async def get_violation(violation_id: str, db: AsyncSession = Depends(get_db)):
+async def get_violation(violation_id: int, db: AsyncSession = Depends(get_db)):
     """Get single violation by ID."""
     result = await db.get(Violation, violation_id)
     if not result:
@@ -70,7 +70,7 @@ async def get_violation(violation_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{violation_id}", response_model=ViolationResponse)
 async def update_violation(
-    violation_id: str,
+    violation_id: int,
     update: ViolationUpdate,
     db: AsyncSession = Depends(get_db),
 ):
@@ -88,7 +88,7 @@ async def update_violation(
 
 
 @router.delete("/{violation_id}", status_code=204)
-async def delete_violation(violation_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_violation(violation_id: int, db: AsyncSession = Depends(get_db)):
     """Soft delete — sets status to DISMISSED."""
     record = await db.get(Violation, violation_id)
     if not record:

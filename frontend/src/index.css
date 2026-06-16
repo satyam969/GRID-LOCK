@@ -416,13 +416,14 @@ code, pre {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
+  min-width: 700px;
 }
 
 .data-table th {
@@ -782,7 +783,7 @@ code, pre {
   .sidebar { width: 60px; }
   .sidebar .logo-text, .sidebar .logo-sub,
   .sidebar .nav-item span, .sidebar-footer { display: none; }
-  .main-content { margin-left: 60px; padding: 16px; }
+  .main-content { margin-left: 60px; padding: 16px; max-width: calc(100vw - 60px); }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

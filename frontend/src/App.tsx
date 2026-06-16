@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchHealth } from './api'
@@ -6,13 +6,23 @@ import { fetchHealth } from './api'
 import Dashboard from './pages/Dashboard'
 import Analyze from './pages/Analyze'
 import Violations from './pages/Violations'
+import VehicleLookup from './pages/VehicleLookup'
+import ChallanManagement from './pages/ChallanManagement'
+import CameraManagement from './pages/CameraManagement'
+import Settings from './pages/Settings'
+import Reports from './pages/Reports'
 import Analytics from './pages/Analytics'
 
 const NAV = [
   { path: '/',          icon: '⚡', label: 'Dashboard' },
   { path: '/analyze',   icon: '🔍', label: 'Analyze' },
   { path: '/violations',icon: '📋', label: 'Violations' },
+  { path: '/vehicles',  icon: '🚘', label: 'Vehicles' },
+  { path: '/challans',  icon: '📄', label: 'Challans' },
+  { path: '/cameras',   icon: '📹', label: 'Cameras' },
   { path: '/analytics', icon: '📊', label: 'Analytics' },
+  { path: '/reports',   icon: '📥', label: 'Reports' },
+  { path: '/settings',  icon: '⚙️', label: 'Settings' },
 ]
 
 function Sidebar() {
@@ -92,7 +102,13 @@ export default function App() {
               <Route path="/"           element={<Dashboard />} />
               <Route path="/analyze"    element={<Analyze />} />
               <Route path="/violations" element={<Violations />} />
+              <Route path="/vehicles"   element={<VehicleLookup />} />
+              <Route path="/challans"   element={<ChallanManagement />} />
+              <Route path="/cameras"    element={<CameraManagement />} />
               <Route path="/analytics"  element={<Analytics />} />
+              <Route path="/reports"    element={<Reports />} />
+              <Route path="/settings"   element={<Settings />} />
+              <Route path="*"           element={<Navigate to="/" replace />} />
             </Routes>
           </motion.div>
         </AnimatePresence>

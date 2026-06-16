@@ -47,10 +47,14 @@ async def get_summary(db: AsyncSession = Depends(get_db)):
         sum(v.confidence for v in all_violations) / total if total else 0.0
     )
 
+    # Resolution rate
+    resolution_rate = ((total - len(pending)) / total * 100) if total > 0 else 0.0
+
     return AnalyticsSummary(
         total_violations=total,
         today_violations=len(today_violations),
         pending_review=len(pending),
+        resolution_rate=round(resolution_rate, 1),
         top_violations=top_violations,
         vehicle_distribution=dict(vehicle_counter),
         avg_confidence=round(avg_conf, 3),

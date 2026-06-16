@@ -14,7 +14,7 @@ import aiofiles
 
 from app.config import settings
 from app.database import get_db
-from app.models.violation import Violation, ViolationType, VehicleType
+from app.models.violation import Violation, ViolationType, VehicleType, Vehicle
 from app.schemas import AnalysisResult, DetectedViolation, BoundingBox, ViolationCreate
 from app.core.preprocessor import ImagePreprocessor
 from app.core.violation_engine import violation_engine
@@ -37,7 +37,6 @@ async def _save_upload(file: UploadFile) -> tuple[Path, str]:
         await f.write(content)
     return path, filename, content
 
-
 async def _persist_violation(
     db: AsyncSession,
     violation: dict,
@@ -50,7 +49,7 @@ async def _persist_violation(
     person_count: Optional[int],
     all_violations: List[dict],
 ) -> Violation:
-    """Save a detected violation to database."""
+    """Save a detected violation to database, tracking Vehicles for repeat offenders."""
     v_types = [v["violation_type"].value if hasattr(v["violation_type"], "value")
                else v["violation_type"] for v in all_violations]
 
@@ -58,12 +57,37 @@ async def _persist_violation(
     if hasattr(v_type, "value"):
         v_type = v_type.value
 
+    vehicle_id = None
+    v_type_str = vehicle_type.value if hasattr(vehicle_type, "value") else vehicle_type
+    
+    if license_plate:
+        stmt = select(Vehicle).where(Vehicle.plate_number == license_plate)
+        result = await db.execute(stmt)
+        vehicle = result.scalars().first()
+        
+        if not vehicle:
+            vehicle = Vehicle(
+                plate_number=license_plate,
+                vehicle_type=v_type_str,
+                total_violations=1
+            )
+            db.add(vehicle)
+        else:
+            vehicle.total_violations += 1
+            if vehicle.total_violations >= 3:
+                vehicle.is_repeat_offender = True
+            db.add(vehicle)
+            
+        await db.flush()
+        vehicle_id = vehicle.id
+
     record = Violation(
+        vehicle_id=vehicle_id,
         violation_type=v_type,
         violation_types=v_types,
         confidence=violation["confidence"],
         severity=violation.get("severity", "medium"),
-        vehicle_type=vehicle_type.value if hasattr(vehicle_type, "value") else vehicle_type,
+        vehicle_type=v_type_str,
         license_plate=license_plate,
         plate_confidence=plate_confidence,
         original_image_path=original_path,

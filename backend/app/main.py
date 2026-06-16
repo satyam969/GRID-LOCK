@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import init_db
 from app.core.detector import model_registry
-from app.api import upload, violations, analytics
+from app.api import upload, violations, analytics, vehicles, challans, cameras, settings as settings_api, reports
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +75,11 @@ API_PREFIX = "/api/v1"
 app.include_router(upload.router, prefix=API_PREFIX)
 app.include_router(violations.router, prefix=API_PREFIX)
 app.include_router(analytics.router, prefix=API_PREFIX)
+app.include_router(vehicles.router, prefix=API_PREFIX)
+app.include_router(challans.router, prefix=API_PREFIX)
+app.include_router(cameras.router, prefix=API_PREFIX)
+app.include_router(settings_api.router, prefix=API_PREFIX)
+app.include_router(reports.router, prefix=API_PREFIX)
 
 
 # ── Health Check ───────────────────────────────────────────────────────────────

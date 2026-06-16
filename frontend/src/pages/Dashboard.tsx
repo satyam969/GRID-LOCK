@@ -104,11 +104,11 @@ export default function Dashboard() {
         </div>
 
         <div className="stat-card" style={{ '--card-accent': 'var(--blue)' } as React.CSSProperties}>
-          <div className="stat-label">Pending Review</div>
-          <div className="stat-value">{summaryLoading ? '...' : summary?.pending_review ?? 0}</div>
-          <div className="stat-icon"><Clock size={24} /></div>
+          <div className="stat-label">Resolution Rate</div>
+          <div className="stat-value">{summaryLoading ? '...' : `${summary?.resolution_rate ?? 0}%`}</div>
+          <div className="stat-icon"><CheckCircle2 size={24} /></div>
           <div className="stat-change" style={{ color: 'var(--blue-light)' }}>
-            Needs Officer Verification
+            <Activity size={12} style={{ marginRight: 4 }}/> Reviewed vs Pending
           </div>
         </div>
 
@@ -251,7 +251,7 @@ export default function Dashboard() {
 
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 15 }}>
                   <span className={`badge ${
-                    v.status === 'approved' ? 'badge-green' :
+                    v.status === 'confirmed' ? 'badge-green' :
                     v.status === 'dismissed' ? 'badge-gray' : 'badge-amber'
                   }`}>
                     {v.status}

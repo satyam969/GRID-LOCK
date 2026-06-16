@@ -1,23 +1,26 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Search, 
-  Filter, 
-  ChevronLeft, 
-  ChevronRight, 
-  Check, 
-  X, 
-  Eye, 
+import {
+  Search,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  X,
+  Eye,
   Calendar,
   MapPin,
   Clock,
   Car,
   FileSpreadsheet,
   FileImage,
-  ExternalLink
+  ExternalLink,
+  Receipt,
+  FileText
 } from 'lucide-react'
-import { fetchViolations, updateViolation, downloadCSV, ViolationRecord } from '../api'
+import { fetchViolations, updateViolation, generateChallan, downloadCSV, ViolationRecord } from '../api'
 
 const VIOLATION_TYPES = [
   { value: '', label: 'All Violations' },
@@ -33,7 +36,7 @@ const VIOLATION_TYPES = [
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
   { value: 'pending', label: 'Pending Review' },
-  { value: 'approved', label: 'Approved' },
+  { value: 'confirmed', label: 'Approved' },
   { value: 'dismissed', label: 'Dismissed' },
 ]
 
@@ -41,7 +44,7 @@ export default function Violations() {
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
-  
+
   // Filter states
   const [violationType, setViolationType] = useState('')
   const [status, setStatus] = useState('')
@@ -66,7 +69,7 @@ export default function Violations() {
 
   // Mutation for updating status
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, newStatus }: { id: string; newStatus: string }) => 
+    mutationFn: ({ id, newStatus }: { id: number; newStatus: string }) =>
       updateViolation(id, { status: newStatus }),
     onSuccess: (updatedRecord) => {
       // Refresh current page query
@@ -76,6 +79,19 @@ export default function Violations() {
       if (selectedViolation && selectedViolation.id === updatedRecord.id) {
         setSelectedViolation(updatedRecord)
       }
+    }
+  })
+
+  // Mutation for generating challans
+  const generateChallanMutation = useMutation({
+    mutationFn: (id: number) => generateChallan(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['violations'] })
+      alert('Challan generated successfully!')
+      setSelectedViolation(null)
+    },
+    onError: (error: any) => {
+      alert(error.response?.data?.detail || 'Failed to generate challan')
     }
   })
 
@@ -93,7 +109,7 @@ export default function Violations() {
     setPage(1)
   }
 
-  const handleUpdateStatus = (id: string, newStatus: string, e?: React.MouseEvent) => {
+  const handleUpdateStatus = (id: number, newStatus: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
     updateStatusMutation.mutate({ id, newStatus })
   }
@@ -116,7 +132,7 @@ export default function Violations() {
 
   const getStatusBadge = (statusVal: string) => {
     switch (statusVal?.toLowerCase()) {
-      case 'approved':
+      case 'confirmed':
         return 'badge-green'
       case 'dismissed':
         return 'badge-gray'
@@ -142,7 +158,7 @@ export default function Violations() {
       {/* Filters Card */}
       <div className="card glass" style={{ marginBottom: 20 }}>
         <form onSubmit={handleSearchSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-          
+
           <div style={{ flex: 2, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Search License Plate</label>
             <div style={{ position: 'relative' }}>
@@ -221,8 +237,8 @@ export default function Violations() {
               </thead>
               <tbody>
                 {data.items.map((record) => (
-                  <tr 
-                    key={record.id} 
+                  <tr
+                    key={record.id}
                     onClick={() => setSelectedViolation(record)}
                     style={{ cursor: 'pointer' }}
                   >
@@ -267,28 +283,28 @@ export default function Violations() {
                     </td>
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
-                        <button 
-                          className="btn btn-secondary btn-sm" 
-                          style={{ padding: 6 }} 
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: 6 }}
                           title="View Details"
                           onClick={() => setSelectedViolation(record)}
                         >
                           <Eye size={13} />
                         </button>
-                        
+
                         {record.status === 'pending' && (
                           <>
-                            <button 
-                              className="btn btn-secondary btn-sm" 
+                            <button
+                              className="btn btn-secondary btn-sm"
                               style={{ padding: 6, color: 'var(--green-light)', borderColor: 'rgba(16,185,129,0.2)' }}
                               title="Approve Violation"
-                              onClick={(e) => handleUpdateStatus(record.id, 'approved', e)}
+                              onClick={(e) => handleUpdateStatus(record.id, 'confirmed', e)}
                               disabled={updateStatusMutation.isPending}
                             >
                               <Check size={13} />
                             </button>
-                            <button 
-                              className="btn btn-secondary btn-sm" 
+                            <button
+                              className="btn btn-secondary btn-sm"
                               style={{ padding: 6, color: 'var(--red-light)', borderColor: 'rgba(239,68,68,0.2)' }}
                               title="Dismiss Incident"
                               onClick={(e) => handleUpdateStatus(record.id, 'dismissed', e)}
@@ -306,11 +322,11 @@ export default function Violations() {
             </table>
 
             {/* Pagination footer */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center', 
-              padding: '12px 16px', 
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 16px',
               borderTop: '1px solid var(--border)',
               background: 'rgba(0,0,0,0.1)'
             }}>
@@ -345,12 +361,13 @@ export default function Violations() {
         )}
       </div>
 
-      {/* Slide-over Detail Drawer */}
-      <AnimatePresence>
+      {/* Slide-over Detail Drawer via Portal */}
+      {createPortal(
+        <AnimatePresence>
         {selectedViolation && (
           <>
             {/* Backdrop */}
-            <motion.div 
+            <motion.div
               style={{
                 position: 'fixed',
                 top: 0, left: 0, right: 0, bottom: 0,
@@ -384,23 +401,23 @@ export default function Violations() {
               transition={{ type: 'tween', duration: 0.25 }}
             >
               {/* Header */}
-              <div style={{ 
-                padding: '20px 24px', 
-                borderBottom: '1px solid var(--border)', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center' 
+              <div style={{
+                padding: '20px 24px',
+                borderBottom: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
               }}>
                 <div>
                   <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Record: #{selectedViolation.id.substring(0, 8)}
+                    Record: #{selectedViolation.id}
                   </div>
                   <h2 style={{ fontSize: '1.25rem', marginTop: 4 }}>
                     {formatViolationType(selectedViolation.violation_type)}
                   </h2>
                 </div>
-                <button 
-                  className="btn btn-secondary btn-sm" 
+                <button
+                  className="btn btn-secondary btn-sm"
                   style={{ padding: 6, borderRadius: '50%' }}
                   onClick={() => setSelectedViolation(null)}
                 >
@@ -422,9 +439,9 @@ export default function Violations() {
                         </a>
                       )}
                     </div>
-                    <img 
-                      src={selectedViolation.annotated_image_path || '/placeholder.jpg'} 
-                      alt="Annotated violation evidence" 
+                    <img
+                      src={selectedViolation.annotated_image_path || '/placeholder.jpg'}
+                      alt="Annotated violation evidence"
                       style={{ height: 260 }}
                     />
                   </div>
@@ -440,18 +457,18 @@ export default function Violations() {
                       </span>
                     </div>
                   </div>
-                  
+
                   {selectedViolation.status === 'pending' && (
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button 
+                      <button
                         className="btn btn-secondary btn-sm"
                         style={{ color: 'var(--green-light)', borderColor: 'rgba(16,185,129,0.2)', background: 'rgba(16,185,129,0.05)' }}
-                        onClick={() => handleUpdateStatus(selectedViolation.id, 'approved')}
+                        onClick={() => handleUpdateStatus(selectedViolation.id, 'confirmed')}
                         disabled={updateStatusMutation.isPending}
                       >
                         <Check size={14} style={{ marginRight: 4 }} /> Approve
                       </button>
-                      <button 
+                      <button
                         className="btn btn-secondary btn-sm"
                         style={{ color: 'var(--red-light)', borderColor: 'rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)' }}
                         onClick={() => handleUpdateStatus(selectedViolation.id, 'dismissed')}
@@ -461,14 +478,27 @@ export default function Violations() {
                       </button>
                     </div>
                   )}
+
+                  {selectedViolation.status === 'confirmed' && (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => generateChallanMutation.mutate(selectedViolation.id)}
+                        disabled={generateChallanMutation.isPending}
+                      >
+                        <FileText size={14} /> Generate Challan
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Metadata */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>METADATA & TELEMETRY</div>
-                  
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    
+
                     <div style={{ background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 6, border: '1px solid var(--border)' }}>
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>CAMERA ID</div>
                       <div style={{ fontSize: '0.875rem', fontWeight: 600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -514,7 +544,7 @@ export default function Violations() {
 
                   {selectedViolation.person_count && selectedViolation.person_count > 1 && (
                     <div style={{ background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.8rem' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Rider / Occupant Counting: </span> 
+                      <span style={{ color: 'var(--text-muted)' }}>Rider / Occupant Counting: </span>
                       <strong>{selectedViolation.person_count} persons</strong> detected on vehicle.
                     </div>
                   )}
@@ -524,7 +554,9 @@ export default function Violations() {
             </motion.div>
           </>
         )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   )
 }

@@ -60,7 +60,7 @@ class ViolationCreate(BaseModel):
 
 
 class ViolationResponse(ViolationCreate):
-    id: str
+    id: int
     timestamp: datetime
     status: ViolationStatus
 
@@ -78,6 +78,93 @@ class PaginatedViolations(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+# ─── Vehicle Schemas ──────────────────────────────────────────────────────────
+
+class VehicleResponse(BaseModel):
+    id: int
+    plate_number: str
+    state_code: Optional[str] = None
+    district_code: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    owner_name: Optional[str] = None
+    total_violations: int
+    first_seen: datetime
+    last_seen: datetime
+    is_repeat_offender: bool
+    flagged: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Challan Schemas ──────────────────────────────────────────────────────────
+
+class ChallanGenerateRequest(BaseModel):
+    violation_id: int
+
+class ChallanResponse(BaseModel):
+    id: int
+    violation_id: int
+    vehicle_id: Optional[int] = None
+    challan_number: str
+    fine_amount: float
+    payment_status: str
+    payment_date: Optional[datetime] = None
+    due_date: datetime
+    issued_by: Optional[str] = None
+    created_at: datetime
+    
+    # Extra relations to hydrate frontend
+    plate_number: Optional[str] = None
+    violation_type: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Camera Schemas ───────────────────────────────────────────────────────────
+
+class CameraCreate(BaseModel):
+    name: str
+    location: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    zone: str
+    direction: Optional[str] = None
+    status: str = "active"
+
+class CameraUpdate(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    zone: Optional[str] = None
+    direction: Optional[str] = None
+    status: Optional[str] = None
+
+class CameraResponse(CameraCreate):
+    id: int
+    installed_date: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ─── Settings Schemas ─────────────────────────────────────────────────────────
+
+class AppSettings(BaseModel):
+    # Detection
+    conf_general: float
+    conf_helmet: float
+    conf_seatbelt: float
+    conf_plate: float
+    
+    # Behavior
+    enable_clahe: bool
+    auto_generate_challans: bool
+    
+    # Notifications
+    email_alerts: bool
+    admin_email: str
 
 
 # ─── Analytics Schemas ────────────────────────────────────────────────────────
@@ -98,6 +185,7 @@ class AnalyticsSummary(BaseModel):
     total_violations: int
     today_violations: int
     pending_review: int
+    resolution_rate: float
     top_violations: List[ViolationCount]
     vehicle_distribution: Dict[str, int]
     avg_confidence: float
