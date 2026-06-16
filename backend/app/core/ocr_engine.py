@@ -1,6 +1,6 @@
 """
-OCR Engine — License plate text extraction using PaddleOCR (PP-OCRv4).
-Replaces EasyOCR to fix duplicate text detection issues.
+OCR Engine — License plate text extraction using EasyOCR.
+Uses EasyOCR for reliable CPU-based OCR without PaddlePaddle oneDNN issues.
 """
 import re
 import logging
@@ -13,34 +13,28 @@ logger = logging.getLogger(__name__)
 
 class OCREngine:
     """
-    High-performance license plate OCR using PaddleOCR PP-OCRv4.
+    License plate OCR using EasyOCR.
     Lazy-loaded to avoid slow startup; initialized on first use.
     """
 
-    _ocr = None
+    _reader = None
     confidence_threshold = 0.30
 
     @classmethod
-    def _get_ocr(cls):
-        if cls._ocr is None:
+    def _get_reader(cls):
+        if cls._reader is None:
             try:
-                # pyrefly: ignore [missing-import]
-                from paddleocr import PaddleOCR
-                logger.info("Loading PaddleOCR model (first use)...")
-                cls._ocr = PaddleOCR(
-                    use_angle_cls=True,
-                    lang='en',
-                    det_db_thresh=0.3,
-                    rec_batch_num=6,
-                )
-                logger.info("✅ PaddleOCR ready")
+                import easyocr
+                logger.info("Loading EasyOCR model (first use)...")
+                cls._reader = easyocr.Reader(['en'], gpu=False)
+                logger.info("✅ EasyOCR ready")
             except ImportError:
-                logger.error("❌ PaddleOCR not installed. Run: pip install paddlepaddle paddleocr")
-                cls._ocr = None
+                logger.error("❌ EasyOCR not installed. Run: pip install easyocr")
+                cls._reader = None
             except Exception as e:
-                logger.error(f"❌ PaddleOCR failed to load: {e}")
-                cls._ocr = None
-        return cls._ocr
+                logger.error(f"❌ EasyOCR failed to load: {e}")
+                cls._reader = None
+        return cls._reader
 
     @staticmethod
     def preprocess_plate(plate_img: np.ndarray) -> np.ndarray:
@@ -64,8 +58,8 @@ class OCREngine:
         Extract text from the license plate region.
         Returns (plate_text, confidence).
         """
-        ocr = cls._get_ocr()
-        if ocr is None:
+        reader = cls._get_reader()
+        if reader is None:
             return None, 0.0
 
         # Crop plate region if bbox is provided
@@ -86,41 +80,79 @@ class OCREngine:
 
         processed = cls.preprocess_plate(plate_img)
         try:
-            results = ocr.ocr(processed)
+            results = reader.readtext(processed)
         except Exception as e:
-            logger.error(f"PaddleOCR failed: {e}")
+            logger.error(f"EasyOCR failed: {e}")
             return None, 0.0
 
-        if not results or not results[0]:
+        if not results:
             return None, 0.0
 
-        # Pick SINGLE highest-confidence line to fix duplicate bug
-        best_text, best_conf = '', 0.0
-        for line in results[0]:
-            text, conf = line[1][0], line[1][1]
-            if conf > best_conf:
-                best_text, best_conf = text, conf
+        # Concatenate all detected text fragments and pick the best approach
+        # Strategy: combine all texts, then validate as Indian plate
+        all_texts = []
+        total_conf = 0.0
+        count = 0
+        for detection in results:
+            text = detection[1]
+            conf = detection[2]
+            if conf >= cls.confidence_threshold:
+                all_texts.append(text)
+                total_conf += conf
+                count += 1
 
-        if best_conf < cls.confidence_threshold:
+        if not all_texts:
             return None, 0.0
 
-        cleaned = cls._validate_indian_plate(best_text)
-        return cleaned or best_text, round(best_conf, 4)
+        # Try combined text first (handles split detections like "WB" + "06 J 2431")
+        combined = ' '.join(all_texts)
+        avg_conf = total_conf / count
+
+        # Also check individual high-confidence results
+        best_single = max(results, key=lambda r: r[2])
+        best_text = best_single[1]
+        best_conf = best_single[2]
+
+        # Validate combined text against Indian plate format
+        combined_plate = cls._validate_indian_plate(combined)
+        single_plate = cls._validate_indian_plate(best_text)
+
+        # Prefer the validated result that looks like a proper plate
+        if combined_plate and re.search(r'[A-Z]{2}\s?\d{2}', combined_plate):
+            return combined_plate, round(avg_conf, 4)
+        elif single_plate and re.search(r'[A-Z]{2}\s?\d{2}', single_plate):
+            return single_plate, round(best_conf, 4)
+        elif combined_plate:
+            return combined_plate, round(avg_conf, 4)
+        elif single_plate:
+            return single_plate, round(best_conf, 4)
+        else:
+            # Return best raw text if no validation matched
+            cleaned = re.sub(r'[^A-Z0-9]', '', combined.upper())
+            if len(cleaned) >= 4:
+                return cleaned, round(avg_conf, 4)
+            return None, 0.0
 
     @staticmethod
     def _validate_indian_plate(raw_text: str) -> Optional[str]:
         """Post-process OCR output to match Indian plate format."""
         cleaned = re.sub(r'[^A-Z0-9]', '', raw_text.upper())
-        match = re.search(r'([A-Z]{2})(\d{2})([A-Z]{1,3})(\d{4})', cleaned)
+        # Fix common OCR misreads
+        cleaned = cleaned.replace('O', '0').replace('I', '1').replace('S', '5').replace('B', '8')
+        # But restore letters where they should be letters (first 2 chars are state code)
+        # Try with original cleaned text first
+        original_cleaned = re.sub(r'[^A-Z0-9]', '', raw_text.upper())
+        
+        match = re.search(r'([A-Z]{2})(\d{2})([A-Z]{1,3})(\d{4})', original_cleaned)
         if match:
             return f'{match.group(1)} {match.group(2)} {match.group(3)} {match.group(4)}'
         
         # BH series match
-        bh_match = re.search(r'(\d{2})(BH)(\d{4})([A-Z]{1,2})', cleaned)
+        bh_match = re.search(r'(\d{2})(BH)(\d{4})([A-Z]{1,2})', original_cleaned)
         if bh_match:
             return f'{bh_match.group(1)} {bh_match.group(2)} {bh_match.group(3)} {bh_match.group(4)}'
             
-        return cleaned
+        return original_cleaned if len(original_cleaned) >= 4 else None
 
     @classmethod
     def extract_from_detections(

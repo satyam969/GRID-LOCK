@@ -4,7 +4,8 @@ Challans API — Generate, list, and pay traffic fines.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, and_
+from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, timedelta
 import uuid
 
@@ -14,15 +15,16 @@ from app.schemas import ChallanResponse, ChallanGenerateRequest
 
 router = APIRouter(prefix="/challans", tags=["Challans"])
 
+# Indian Motor Vehicle Act 2019 fine schedule
 FINE_SCHEDULE = {
-    'helmet_non_compliance': 1000,
-    'seatbelt_non_compliance': 1000,
-    'triple_riding': 2000,
-    'wrong_side_driving': 5000,
-    'stop_line_violation': 1000,
-    'red_light_violation': 2000,
-    'illegal_parking': 500,
-    'multiple': 3000
+    'helmet_non_compliance':   {'first': 1000, 'repeat': 2000, 'section': '194D'},
+    'seatbelt_non_compliance': {'first': 1000, 'repeat': 1000, 'section': '194B(1)'},
+    'triple_riding':           {'first': 2000, 'repeat': 5000, 'section': '194C'},
+    'wrong_side_driving':      {'first': 5000, 'repeat': 10000, 'section': '184'},
+    'stop_line_violation':     {'first':  500, 'repeat': 1500, 'section': '177'},
+    'red_light_violation':     {'first': 2000, 'repeat': 5000, 'section': '177A'},
+    'illegal_parking':         {'first':  500, 'repeat': 1500, 'section': '177'},
+    'multiple':                {'first': 3000, 'repeat': 6000, 'section': 'Multiple'},
 }
 
 @router.get("", response_model=List[ChallanResponse])
@@ -60,7 +62,8 @@ async def generate_challan(
 ):
     """Generate a challan for a confirmed violation."""
     # Check if violation exists
-    violation = await db.get(Violation, req.violation_id)
+    stmt = select(Violation).options(joinedload(Violation.vehicle)).where(Violation.id == req.violation_id)
+    violation = (await db.execute(stmt)).scalars().first()
     if not violation:
         raise HTTPException(404, "Violation not found")
         
@@ -70,9 +73,9 @@ async def generate_challan(
     if existing:
         raise HTTPException(400, "Challan already issued for this violation")
         
-    fine = FINE_SCHEDULE.get(violation.violation_type, 1000)
-    if violation.vehicle and violation.vehicle.is_repeat_offender:
-        fine *= 2 # Repeat offenders pay double!
+    schedule = FINE_SCHEDULE.get(violation.violation_type, {'first': 1000, 'repeat': 2000})
+    is_repeat = violation.vehicle and violation.vehicle.is_repeat_offender
+    fine = schedule['repeat'] if is_repeat else schedule['first']
         
     challan = Challan(
         violation_id=violation.id,
@@ -121,3 +124,44 @@ async def pay_challan(
     
     # Just return without the joins for simplicity on update
     return ChallanResponse.model_validate(challan)
+
+
+@router.get("/revenue-summary")
+async def get_revenue_summary(db: AsyncSession = Depends(get_db)):
+    """Revenue dashboard data — total fines, collected, pending, overdue."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    total_issued = (await db.execute(
+        select(func.count(Challan.id))
+    )).scalar() or 0
+
+    total_amount = (await db.execute(
+        select(func.coalesce(func.sum(Challan.fine_amount), 0))
+    )).scalar() or 0
+
+    collected = (await db.execute(
+        select(func.coalesce(func.sum(Challan.fine_amount), 0)).where(
+            Challan.payment_status == 'PAID'
+        )
+    )).scalar() or 0
+
+    pending = (await db.execute(
+        select(func.coalesce(func.sum(Challan.fine_amount), 0)).where(
+            Challan.payment_status == 'UNPAID'
+        )
+    )).scalar() or 0
+
+    overdue_count = (await db.execute(
+        select(func.count(Challan.id)).where(
+            and_(Challan.payment_status == 'UNPAID', Challan.due_date < now)
+        )
+    )).scalar() or 0
+
+    return {
+        'total_challans_issued': total_issued,
+        'total_fine_amount': total_amount,
+        'amount_collected': collected,
+        'amount_pending': pending,
+        'overdue_count': overdue_count,
+        'collection_rate': round((collected / max(total_amount, 1)) * 100, 1),
+    }

@@ -1,0 +1,10 @@
+{
+    "conf_general": 0.45,
+    "conf_helmet": 0.4,
+    "conf_seatbelt": 0.4,
+    "conf_plate": 1.0,
+    "enable_clahe": false,
+    "auto_generate_challans": false,
+    "email_alerts": false,
+    "admin_email": "admin@trafficguard.ai"
+}
