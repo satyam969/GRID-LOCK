@@ -88,50 +88,20 @@ class OCREngine:
         if not results:
             return None, 0.0
 
-        # Concatenate all detected text fragments and pick the best approach
-        # Strategy: combine all texts, then validate as Indian plate
-        all_texts = []
-        total_conf = 0.0
-        count = 0
+        # Fix: Pick SINGLE highest-confidence result
+        # to avoid garbage concatenated output
+        best_text, best_conf = '', 0.0
         for detection in results:
             text = detection[1]
             conf = detection[2]
-            if conf >= cls.confidence_threshold:
-                all_texts.append(text)
-                total_conf += conf
-                count += 1
+            if conf > best_conf:
+                best_text, best_conf = text, conf
 
-        if not all_texts:
+        if best_conf < cls.confidence_threshold:
             return None, 0.0
 
-        # Try combined text first (handles split detections like "WB" + "06 J 2431")
-        combined = ' '.join(all_texts)
-        avg_conf = total_conf / count
-
-        # Also check individual high-confidence results
-        best_single = max(results, key=lambda r: r[2])
-        best_text = best_single[1]
-        best_conf = best_single[2]
-
-        # Validate combined text against Indian plate format
-        combined_plate = cls._validate_indian_plate(combined)
-        single_plate = cls._validate_indian_plate(best_text)
-
-        # Prefer the validated result that looks like a proper plate
-        if combined_plate and re.search(r'[A-Z]{2}\s?\d{2}', combined_plate):
-            return combined_plate, round(avg_conf, 4)
-        elif single_plate and re.search(r'[A-Z]{2}\s?\d{2}', single_plate):
-            return single_plate, round(best_conf, 4)
-        elif combined_plate:
-            return combined_plate, round(avg_conf, 4)
-        elif single_plate:
-            return single_plate, round(best_conf, 4)
-        else:
-            # Return best raw text if no validation matched
-            cleaned = re.sub(r'[^A-Z0-9]', '', combined.upper())
-            if len(cleaned) >= 4:
-                return cleaned, round(avg_conf, 4)
-            return None, 0.0
+        cleaned = cls._validate_indian_plate(best_text)
+        return cleaned or best_text, round(best_conf, 4)
 
     @staticmethod
     def _validate_indian_plate(raw_text: str) -> Optional[str]:

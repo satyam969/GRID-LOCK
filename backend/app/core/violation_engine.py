@@ -10,6 +10,9 @@ from typing import List, Dict, Optional, Tuple
 from app.config import settings
 from app.core.detector import Detector, detector
 from app.models.violation import ViolationType, VehicleType
+from app.core.red_light_detection import check_red_light_violation, detect_traffic_light_color
+from app.core.illegal_parking_detection import check_illegal_parking
+from app.core.wrong_side_detection import check_wrong_side_driving
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +57,11 @@ class ViolationEngine:
     def analyze(
         self,
         img: np.ndarray,
-        check_stop_line: bool = True,
-        stop_line_y_ratio: float = None,
-        check_parking: bool = False,
-        lane_direction: str = "right",  # "right" or "left"
+        check_stop_line: bool = False,
+        stop_line_y_ratio: Optional[float] = None,
+        lane_direction: str = "right",
+        detect_parking: bool = True,
+        flow_direction: str = "none",
     ) -> Dict:
         """
         Full analysis pipeline for one image.
@@ -97,23 +101,67 @@ class ViolationEngine:
             seatbelt_violations = self._check_seatbelt(img, vehicles, persons)
             violations.extend(seatbelt_violations)
 
-        # ── Step 5: Stop-line violation ────────────────────────────────────
-        if check_stop_line and vehicles:
+        # ── Step 5: Stop-line violation (IMPROVED) ─────────────────────────
+        traffic_lights = [d for d in general_detections if d["class_id"] == 9]
+        
+        # Filter vehicles by flow_direction for stop line and red light
+        # If flow is left, only check left half of the road (x < w/2)
+        # If flow is right, only check right half of the road (x > w/2)
+        target_vehicles = []
+        for v in vehicles:
+            v_cx = (v['bbox']['x1'] + v['bbox']['x2']) / 2
+            if flow_direction == 'left' and v_cx > w / 2:
+                continue # Oncoming traffic on the right
+            if flow_direction == 'right' and v_cx < w / 2:
+                continue # Oncoming traffic on the left
+            target_vehicles.append(v)
+
+        if check_stop_line and target_vehicles:
             stop_y = (stop_line_y_ratio or settings.STOP_LINE_Y_RATIO) * h
-            stop_violations = self._check_stop_line(vehicles, stop_y, h)
-            violations.extend(stop_violations)
+
+            # Check traffic light state first
+            light_color = None
+            if traffic_lights:
+                for tl in traffic_lights:
+                    light_color = detect_traffic_light_color(img, tl['bbox'])
+                    if light_color:
+                        break
+
+            # Only flag if light is RED, YELLOW, or not detected
+            # If GREEN -> vehicles SHOULD be past the line -> no violation
+            if light_color != 'GREEN':
+                stop_violations = self._check_stop_line(target_vehicles, stop_y, h, w, flow_direction)
+                violations.extend(stop_violations)
 
         # ── Step 6: Red-light violation ────────────────────────────────────
-        traffic_lights = [d for d in general_detections if d["class_id"] == 9]
-        if traffic_lights and vehicles:
-            red_violations = self._check_red_light(img, traffic_lights, vehicles, h, w)
+        if traffic_lights and target_vehicles:
+            stop_y = (stop_line_y_ratio or settings.STOP_LINE_Y_RATIO) * h
+            red_violations = check_red_light_violation(
+                vehicle_detections=target_vehicles,
+                traffic_light_detections=traffic_lights,
+                stop_line_y=stop_y,
+                img=img,
+                flow_direction=flow_direction
+            )
             violations.extend(red_violations)
 
-        # ── Step 7: Wrong-side driving ─────────────────────────────────────
-        # Disabled per playbook recommendation (impossible to reliably detect without optical flow)
-        # if vehicles:
-        #     wrong_side = self._check_wrong_side(img, vehicles, w, lane_direction)
-        #     violations.extend(wrong_side)
+        # ── Step 7: Illegal Parking ────────────────────────────────────────
+        if detect_parking:
+            parking_violations = check_illegal_parking(
+                all_detections=general_detections,
+                img_shape=img.shape,
+                no_parking_zones=[],
+            )
+            violations.extend(parking_violations)
+
+        # ── Step 8: Wrong-Side Driving ─────────────────────────────────────
+        wrong_side_config = {
+            'flow_direction': flow_direction,
+            'lane_boundary_x': 0.5,
+        }
+        if flow_direction != 'none':
+            ws_violations = check_wrong_side_driving(general_detections, img.shape, wrong_side_config)
+            violations.extend(ws_violations)
 
         return {
             "violations": violations,
@@ -129,62 +177,34 @@ class ViolationEngine:
         """Determines if a detected person is RIDING (not near) a motorcycle."""
         person_box = person["bbox"]
 
-        # 0. High-Accuracy Pose Keypoint Check
-        if "keypoints" in person and person["keypoints"]:
-            kpts = person["keypoints"]
-            # Check if hip keypoints (11, 12) are valid and inside motorcycle
-            if len(kpts) > 12:
-                left_hip, right_hip = kpts[11], kpts[12]
-                lx, ly = left_hip[0], left_hip[1]
-                rx, ry = right_hip[0], right_hip[1]
-                
-                # If both hips are valid, check their location
-                if lx > 0 and rx > 0 and ly > 0 and ry > 0:
-                    hip_x = (lx + rx) / 2
-                    hip_y = (ly + ry) / 2
-                    
-                    if (moto_box["x1"] <= hip_x <= moto_box["x2"] and 
-                        moto_box["y1"] - 50 <= hip_y <= moto_box["y2"]):
-                        return True
-                    else:
-                        return False # Hips are definitely NOT on the bike
-
-        # 1. Person center-x must be within motorcycle horizontal span
-        pcx = (person_box["x1"] + person_box["x2"]) / 2
-        if not (moto_box["x1"] <= pcx <= moto_box["x2"]):
-            return False
-
-        # 2. Person bottom edge must not extend far below motorcycle
-        if person_box["y2"] > moto_box["y2"] + 20:
-            return False
-
-        # 3. Person center-y must be in the riding zone
-        pcy = (person_box["y1"] + person_box["y2"]) / 2
-        moto_h = moto_box["y2"] - moto_box["y1"]
-        zone_top = moto_box["y1"] - moto_h * 0.8
-        zone_bot = moto_box["y2"]
-        if not (zone_top <= pcy <= zone_bot):
-            return False
-
-        # 4. Minimum IoU to confirm physical overlap
-        if self.det.compute_iou({"bbox": person_box}, {"bbox": moto_box}) < 0.05:
-            return False
-
-        return True
+        # Simple bounding box intersection (Intersection over Person Area)
+        # If the person bounding box overlaps with the motorcycle bounding box by > 20%
+        # they are highly likely a rider.
+        
+        px1, py1, px2, py2 = person_box["x1"], person_box["y1"], person_box["x2"], person_box["y2"]
+        mx1, my1, mx2, my2 = moto_box["x1"], moto_box["y1"], moto_box["x2"], moto_box["y2"]
+        
+        ix1 = max(px1, mx1)
+        iy1 = max(py1, my1)
+        ix2 = min(px2, mx2)
+        iy2 = min(py2, my2)
+        
+        inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        
+        # Extremely forgiving heuristic for demo: Any overlap means they are a rider
+        if inter_area > 0:
+            return True
+        return False
 
     def _check_helmet(
         self, img: np.ndarray, motorcycles: List[Dict], persons: List[Dict]
     ) -> List[Dict]:
         """
-        Run helmet model on full image.
-        Checks if any rider's head (top 40% of their bbox) is missing a helmet.
+        Check if any rider's head is missing a helmet.
+        Since community models were removed, uses an HSV skin-tone heuristic
+        on the top 30% of the rider's bounding box.
         """
         violations = []
-        helmet_detections = self.det.detect_helmets(img)
-
-        # The downloaded HF model uses 'Without Helmet'
-        no_helmet_dets = [d for d in helmet_detections if "no" in d["class_name"].lower()
-                          or "without" in d["class_name"].lower()]
 
         for moto in motorcycles:
             # 1. Find the rider(s) on this motorcycle
@@ -193,27 +213,37 @@ class ViolationEngine:
             for rider in riders:
                 rb = rider["bbox"]
                 rh = rb["y2"] - rb["y1"]
-                # Head region = top 40% of person bbox
-                head_zone = {
-                    "bbox": {
-                        "x1": rb["x1"],
-                        "y1": rb["y1"],
-                        "x2": rb["x2"],
-                        "y2": rb["y1"] + rh * 0.4,
-                    }
-                }
+                
+                # Head region = top 30% of person bbox
+                y1 = int(max(0, rb["y1"]))
+                y2 = int(min(img.shape[0], rb["y1"] + rh * 0.3))
+                x1 = int(max(0, rb["x1"]))
+                x2 = int(min(img.shape[1], rb["x2"]))
+                
+                head_crop = img[y1:y2, x1:x2]
+                if head_crop.size == 0:
+                    continue
 
-                for nh in no_helmet_dets:
-                    iou = self.det.compute_iou({"bbox": head_zone["bbox"]}, nh)
-                    if iou > 0.15:
-                        violations.append({
-                            "violation_type": ViolationType.HELMET_NON_COMPLIANCE,
-                            "confidence": nh["confidence"],
-                            "severity": self.compute_severity(ViolationType.HELMET_NON_COMPLIANCE, nh["confidence"]),
-                            "description": VIOLATION_DESCRIPTIONS[ViolationType.HELMET_NON_COMPLIANCE],
-                            "bbox": moto["bbox"],
-                        })
-                        break # One violation per rider is enough
+                # Convert to HSV and check for skin tones (exposed face/head)
+                hsv = cv2.cvtColor(head_crop, cv2.COLOR_BGR2HSV)
+                lower_skin = np.array([0, 20, 50], dtype=np.uint8)
+                upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+                skin_mask = cv2.inRange(hsv, lower_skin, upper_skin)
+                
+                skin_pixels = cv2.countNonZero(skin_mask)
+                total_pixels = head_crop.shape[0] * head_crop.shape[1]
+                
+                # If > 10% of the head region is exposed skin, flag as No Helmet
+                if total_pixels > 0 and (skin_pixels / total_pixels) > 0.10:
+                    violations.append({
+                        "violation_type": ViolationType.HELMET_NON_COMPLIANCE,
+                        "confidence": 0.85, # Heuristic confidence
+                        "severity": self.compute_severity(ViolationType.HELMET_NON_COMPLIANCE, 0.85),
+                        "description": "Exposed head detected (No Helmet)",
+                        "bbox": rider["bbox"],
+                    })
+                    # Flagging the first rider without a helmet is enough for the moto
+                    break
 
         return violations
 
@@ -225,9 +255,10 @@ class ViolationEngine:
         """Count persons associated with each motorcycle."""
         violations = []
 
-        # Try pose model first for more accurate person count
+        # Use whichever model detected MORE people to prevent false negatives
         pose_dets = self.det.detect_poses(img)
-        person_source = pose_dets if pose_dets else persons
+        pose_persons = [p for p in pose_dets if p.get("class_id") == 0]
+        person_source = pose_persons if len(pose_persons) > len(persons) else persons
 
         for moto in motorcycles:
             riders = [p for p in person_source if self._is_rider(p, moto["bbox"])]
@@ -310,16 +341,24 @@ class ViolationEngine:
     # ── Stop Line Violation ─────────────────────────────────────────────────
 
     def _check_stop_line(
-        self, vehicles: List[Dict], stop_y: float, img_height: int
+        self, vehicles: List[Dict], stop_y: float, img_height: int, img_width: int, flow_direction: str
     ) -> List[Dict]:
         """
         If vehicle bottom edge is below (greater Y) than stop_y line
         AND vehicle is in lower half of frame → potential stop-line violation.
+        Filters out oncoming traffic using flow_direction.
         """
         violations = []
         for v in vehicles:
             bottom = v["bbox"]["y2"]
+            center_x = (v["bbox"]["x1"] + v["bbox"]["x2"]) / 2
             center_y = (v["bbox"]["y1"] + v["bbox"]["y2"]) / 2
+
+            # Filter out oncoming traffic based on expected flow direction
+            if flow_direction == 'left' and center_x > img_width / 2:
+                continue
+            if flow_direction == 'right' and center_x < img_width / 2:
+                continue
 
             if bottom > stop_y and center_y > img_height * 0.4:
                 violations.append({

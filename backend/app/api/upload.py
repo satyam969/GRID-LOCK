@@ -108,6 +108,8 @@ async def analyze_image(
     location: Optional[str] = Form(None),
     enhance_contrast: bool = Form(True),
     check_stop_line: bool = Form(False),
+    detect_parking: bool = Form(True),
+    flow_direction: str = Form("none"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -133,7 +135,12 @@ async def analyze_image(
 
     # ── 2. Run violation engine ────────────────────────────────────────────
     try:
-        result = violation_engine.analyze(img, check_stop_line=check_stop_line)
+        result = violation_engine.analyze(
+            img, 
+            check_stop_line=check_stop_line,
+            detect_parking=detect_parking,
+            flow_direction=flow_direction
+        )
     except Exception as e:
         logger.error(f"Violation engine error: {e}", exc_info=True)
         raise HTTPException(500, f"Detection failed: {e}")

@@ -1,33 +1,39 @@
-# Implementation Plan: Deep ONNX Optimization & INT8 Quantization
+# Implementation Plan: Final Phase Completion
 
-You are absolutely right. While downsizing to `yolov8n` solved the immediate timeout ceiling, to achieve true production-ready 5-15s CPU inference, we must fully execute the optimizations detailed in your **TrafficGuard AI Optimization Guide**, specifically migrating the neural networks from PyTorch eager mode to **ONNX Runtime** with **INT8 Quantization**.
+## Goal
+Implement the remaining features from the `TrafficGuard_AI_Final_Phase_Completion.md` document to finalize the prototype for the hackathon submission.
 
-## Open Questions
-- The optimization guide provides a custom `ONNXDetector` class for bounding boxes. However, because we recently added **Pose Estimation** (which outputs a complex 3D skeletal tensor rather than just 2D bounding boxes), writing a custom numpy post-processor for the pose model is highly error-prone. 
-- **Recommendation:** We can still export the models to ONNX INT8, but load them using the `YOLO("model_int8.onnx", task="pose")` wrapper. Ultralytics natively uses `onnxruntime` under the hood when given an `.onnx` file, achieving the exact same C++ speedup while perfectly handling the complex pose keypoint math for us. Do you approve of this approach?
+## Current Status of Final Phase Tasks
+1. **EasyOCR Single-Line Fix:** Needs implementation. Our current code concatenates all strings (which the guide points out causes garbage output). We need to pick the single highest-confidence line instead.
+2. **Red-Light Violation Detection:** Needs implementation.
+3. **Illegal Parking Detection:** Needs implementation.
+4. **Updated Fine Schedule:** ✅ Already completed in the previous sprint!
+5. **GitHub Repository Preparation:** We can add `red_light_detection.py` and `illegal_parking_detection.py` to the core folder, fulfilling the architecture layout requested.
 
 ## Proposed Changes
 
-### 1. Environment Updates
-#### [MODIFY] [requirements.txt](file:///d:/trafficguard-ai/trafficguard-ai/backend/requirements.txt)
-- Add `onnx` and `onnxruntime` dependencies required for graph compilation and optimized CPU execution.
+### 1. EasyOCR Single-Line Fix
+#### [MODIFY] [backend/app/core/ocr_engine.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/ocr_engine.py)
+- Change `extract_plate_text` to pick the single highest-confidence result from the EasyOCR output rather than concatenating all texts.
 
-### 2. Export & Quantization Pipeline
-#### [NEW] [backend/scripts/optimize_models.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/scripts/optimize_models.py)
-- A new utility script that will:
-  1. Export `yolov8n`, `yolov8n-pose`, `helmet_best`, `seatbelt_best`, and `plate_best` to ONNX format with dynamic batching.
-  2. Use `onnxruntime.quantization.quantize_dynamic` to convert the FP32 weights into 8-bit integers (INT8), shrinking model size by 4x and boosting CPU throughput by an additional 2-3x.
+### 2. Red-Light Violation Detection
+#### [NEW] [backend/app/core/red_light_detection.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/red_light_detection.py)
+- Create new file with `detect_traffic_light_color` (using HSV color thresholding) and `check_red_light_violation` functions.
+#### [MODIFY] [backend/app/core/violation_engine.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/violation_engine.py)
+- Import `check_red_light_violation`.
+- Integrate the red-light check stage into the `analyze` function (using `class_id == 9` for traffic lights).
 
-### 3. Inference Engine Update
-#### [MODIFY] [backend/app/core/detector.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/detector.py)
-- Refactor the `ModelRegistry` to point to the new `*_int8.onnx` optimized files instead of the native PyTorch `.pt` files.
-- The rest of the pipeline (`violation_engine.py`) requires zero changes because the Ultralytics wrapper maintains the exact same prediction API.
+### 3. Illegal Parking Detection
+#### [NEW] [backend/app/core/illegal_parking_detection.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/illegal_parking_detection.py)
+- Create new file with `check_illegal_parking` function (heuristic based on road edge proximity and lack of nearby persons).
+#### [MODIFY] [backend/app/core/violation_engine.py](file:///d:/trafficguard-ai/trafficguard-ai/backend/app/core/violation_engine.py)
+- Import `check_illegal_parking`.
+- Integrate the illegal parking check stage into the `analyze` function.
+#### [MODIFY] [frontend/src/pages/Analyze.tsx](file:///d:/trafficguard-ai/trafficguard-ai/frontend/src/pages/Analyze.tsx)
+- Add a UI toggle in the Configuration panel for "Detect Illegal Parking".
 
-## Verification Plan
-1. Install the ONNX dependencies.
-2. Run `optimize_models.py` and verify it successfully generates the `.onnx` and `_int8.onnx` files in the `models_weights` directory.
-3. Start the Uvicorn server and process an image via the React frontend.
-4. Verify in the backend logs that the `inference_time_ms` drops significantly (targeting under 10 seconds).
-
+## User Review Required
 > [!IMPORTANT]
-> Please review the plan above. If you approve, I will install the packages, run the quantization script, and wire up the ONNX runtime immediately!
+> The Red-Light and Illegal Parking features use heuristics (color thresholding and position/proximity, respectively) rather than dedicated machine learning models. This is highly efficient and perfectly acceptable for the hackathon, but may require parameter tuning (like the red HSV bounds or edge percentages) depending on your test images. I will implement them exactly as suggested in the guide.
+
+Please approve this plan so I can begin the implementation!

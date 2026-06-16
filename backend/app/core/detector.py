@@ -106,15 +106,22 @@ class Detector:
         self, img: np.ndarray, conf: Optional[float] = None
     ) -> List[Dict]:
         """
-        Run COCO general model. Returns vehicles and persons.
+        Run COCO general model. Returns vehicles and persons, and traffic lights.
+        Uses lower threshold for traffic lights to improve recall.
         """
         model = self.registry.get("general")
         if model is None:
             return []
 
-        threshold = conf or settings.CONF_GENERAL
-        results = model(img, conf=threshold, iou=settings.NMS_IOU, verbose=False)
-        return self._parse_results(results[0], filter_classes=list(self.COCO_CLASSES.keys()))
+        # Run with lowest threshold to capture traffic lights
+        base_threshold = conf or settings.CONF_GENERAL
+        results = model(img, conf=0.12, iou=settings.NMS_IOU, verbose=False)
+        return self._parse_results(
+            results[0], 
+            filter_classes=list(self.COCO_CLASSES.keys()),
+            base_conf=base_threshold,
+            traffic_light_conf=0.12
+        )
 
     def detect_helmets(self, img: np.ndarray) -> List[Dict]:
         """Detect helmet / no-helmet on the image."""
@@ -156,7 +163,12 @@ class Detector:
         return detections
 
     @staticmethod
-    def _parse_results(result, filter_classes: Optional[List[int]] = None) -> List[Dict]:
+    def _parse_results(
+        result, 
+        filter_classes: Optional[List[int]] = None,
+        base_conf: float = 0.0,
+        traffic_light_conf: float = 0.0
+    ) -> List[Dict]:
         """Parse ultralytics Results object into list of dicts."""
         detections = []
         if result.boxes is None:
@@ -168,6 +180,15 @@ class Detector:
             if filter_classes and cls_id not in filter_classes:
                 continue
             conf = float(boxes.conf[i].item())
+            
+            # IMPROVEMENT: Custom thresholding per class
+            if cls_id == 9:
+                if conf < traffic_light_conf:
+                    continue
+            else:
+                if conf < base_conf:
+                    continue
+
             xyxy = boxes.xyxy[i].cpu().numpy()
             cls_name = result.names.get(cls_id, str(cls_id))
 
