@@ -199,15 +199,15 @@ class ViolationEngine:
         """Determines if a detected person is RIDING (not near) a motorcycle."""
         pb = person["bbox"]
         
-        # Expand person box by 20% to be extremely forgiving for demo
-        pw = pb["x2"] - pb["x1"]
-        ph = pb["y2"] - pb["y1"]
-        px1 = pb["x1"] - (pw * 0.2)
-        py1 = pb["y1"] - (ph * 0.2)
-        px2 = pb["x2"] + (pw * 0.2)
-        py2 = pb["y2"] + (ph * 0.2)
+        # Expand motorcycle box by 50% in all directions to catch riders sitting far back
+        mw = moto_box["x2"] - moto_box["x1"]
+        mh = moto_box["y2"] - moto_box["y1"]
+        mx1 = moto_box["x1"] - (mw * 0.5)
+        my1 = moto_box["y1"] - (mh * 0.5)
+        mx2 = moto_box["x2"] + (mw * 0.5)
+        my2 = moto_box["y2"] + (mh * 0.5)
         
-        mx1, my1, mx2, my2 = moto_box["x1"], moto_box["y1"], moto_box["x2"], moto_box["y2"]
+        px1, py1, px2, py2 = pb["x1"], pb["y1"], pb["x2"], pb["y2"]
         
         ix1 = max(px1, mx1)
         iy1 = max(py1, my1)
@@ -216,7 +216,7 @@ class ViolationEngine:
         
         inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
         
-        # Any expanded overlap means they are a rider
+        # Any overlap with the massively expanded motorcycle box means they are a rider
         if inter_area > 0:
             return True
         return False
