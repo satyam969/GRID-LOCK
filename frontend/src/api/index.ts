@@ -211,7 +211,7 @@ export const updateSettings = async (payload: any) => {
 }
 
 export const generateReport = (type: string) => {
-  window.open(`http://127.0.0.1:8000/api/v1/reports/generate?type=${type}`, '_blank')
+  window.open(`/api/v1/reports/generate?type=${type}`, '_blank')
 }
 
 export default api
