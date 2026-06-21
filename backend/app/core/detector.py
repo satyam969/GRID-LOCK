@@ -32,42 +32,74 @@ class ModelRegistry:
         ModelRegistry._initialized = True
 
     def load_all(self):
-        """Load all models at application startup."""
+        """Load all models at application startup.
+
+        Priority for each model:
+          1. INT8 ONNX file  (fastest, quantized)
+          2. .pt file in models_weights/  (standard PyTorch weights)
+          3. Auto-download from Ultralytics (official general/pose only)
+          4. Fall back to general COCO model (community models only)
+        """
         from ultralytics import YOLO
 
+        # (onnx_filename, pt_filename)
         model_configs = {
-            "general": "yolov8n_int8.onnx",                 
-            "pose": "yolov8n-pose_int8.onnx",               
-            "helmet": settings.MODEL_HELMET.replace(".pt", "_int8.onnx"),         
-            "seatbelt": settings.MODEL_SEATBELT.replace(".pt", "_int8.onnx"),     
-            "plate": settings.MODEL_PLATE.replace(".pt", "_int8.onnx"),           
+            "general": ("yolov8n_int8.onnx",           "yolov8n.pt"),
+            "pose":    ("yolov8n-pose_int8.onnx",       "yolov8n-pose.pt"),
+            "helmet":  (settings.MODEL_HELMET.replace(".pt", "_int8.onnx"),   settings.MODEL_HELMET),
+            "seatbelt":(settings.MODEL_SEATBELT.replace(".pt", "_int8.onnx"), settings.MODEL_SEATBELT),
+            "plate":   (settings.MODEL_PLATE.replace(".pt", "_int8.onnx"),    settings.MODEL_PLATE),
         }
 
-        for name, filename in model_configs.items():
-            path = settings.MODELS_DIR / filename
+        for name, (onnx_file, pt_file) in model_configs.items():
             task_type = "pose" if name == "pose" else "detect"
-            try:
-                if path.exists():
-                    logger.info(f"Loading {name} model from {path}")
-                    self._models[name] = YOLO(str(path), task=task_type)
-                elif name in ("general", "pose"):
-                    # Official Ultralytics models — auto-downloaded if missing
-                    logger.info(f"Auto-downloading official model: {filename}")
-                    self._models[name] = YOLO(filename, task=task_type)
-                else:
-                    # Community model missing — fall back to COCO general
-                    logger.warning(
-                        f"Community model '{filename}' not found. "
-                        f"Run scripts/download_models.py to fetch it. "
-                        f"Using COCO general as fallback for '{name}'."
-                    )
-                    self._models[name] = self._models.get("general")
-                self._status[name] = True
+            loaded = False
+
+            # 1. Try INT8 ONNX
+            onnx_path = settings.MODELS_DIR / onnx_file
+            if onnx_path.exists():
+                try:
+                    logger.info(f"Loading {name} model (INT8 ONNX) from {onnx_path}")
+                    self._models[name] = YOLO(str(onnx_path), task=task_type)
+                    loaded = True
+                except Exception as e:
+                    logger.warning(f"Failed to load ONNX for '{name}': {e}. Trying .pt ...")
+
+            # 2. Try .pt in models_weights/
+            if not loaded:
+                pt_path = settings.MODELS_DIR / pt_file
+                if pt_path.exists():
+                    try:
+                        logger.info(f"Loading {name} model (.pt) from {pt_path}")
+                        self._models[name] = YOLO(str(pt_path), task=task_type)
+                        loaded = True
+                    except Exception as e:
+                        logger.warning(f"Failed to load .pt for '{name}': {e}")
+
+            # 3. For official models, auto-download from Ultralytics Hub
+            if not loaded and name in ("general", "pose"):
+                try:
+                    logger.info(f"Auto-downloading official model: {pt_file}")
+                    self._models[name] = YOLO(pt_file, task=task_type)
+                    loaded = True
+                except Exception as e:
+                    logger.error(f"❌ Auto-download failed for '{pt_file}': {e}")
+
+            # 4. For community models, fall back to the general COCO model
+            if not loaded and name not in ("general", "pose"):
+                logger.warning(
+                    f"'{onnx_file}' and '{pt_file}' not found in models_weights/. "
+                    f"Run scripts/download_models.py to fetch them. "
+                    f"Using COCO general as fallback for '{name}'."
+                )
+                self._models[name] = self._models.get("general")
+                loaded = self._models.get("general") is not None
+
+            self._status[name] = loaded and self._models.get(name) is not None
+            if self._status[name]:
                 logger.info(f"✅ Model '{name}' ready")
-            except Exception as e:
-                logger.error(f"❌ Failed to load model '{name}': {e}")
-                self._status[name] = False
-                self._models[name] = None
+            else:
+                logger.error(f"❌ Failed to load model '{name}'")
 
     def get(self, name: str):
         return self._models.get(name)
