@@ -12,6 +12,13 @@
 
 ---
 
+### 🌐 Live Deployment
+**Live Demo:** [https://grid-lock-khaki.vercel.app/](https://grid-lock-khaki.vercel.app/)
+
+> **⚠️ Performance Note:** The live demo is hosted on a free HuggingFace CPU container (2 vCPUs). Inference time per image takes roughly **10-15 seconds**. When running locally or on a paid GPU instance, the optimized INT8 ONNX models process images in **< 1 second**.
+
+---
+
 ## 💡 What is TrafficGuard AI?
 
 **TrafficGuard AI** is a production-grade, end-to-end intelligent traffic enforcement platform that uses a **cascaded, multi-model AI pipeline** to detect 7 distinct traffic violations from a single camera frame — without any manual intervention.
@@ -25,13 +32,13 @@ Unlike systems relying on a single slow monolithic model, TrafficGuard AI runs *
 ### 🤖 AI Violation Detection (7 Violation Types)
 | Violation | Detection Method |
 |-----------|-----------------|
-| **Triple Riding** | YOLOv8n-Pose skeletal hip-keypoint mapping to confirm riders seated on motorcycle |
+| **Triple Riding** | Dual-Model Union: Dynamically queries both General Object Detection and Pose Estimation models, using Center-Point Euclidean Distance to map heavily-occluded passengers to motorcycles. |
 | **Helmet Non-Compliance** | Custom INT8 helmet classifier + skin-tone HSV fallback heuristic |
 | **Seatbelt Non-Compliance** | Windshield crop (top 45% of car bbox) fed to INT8 seatbelt classifier |
 | **Red-Light Crossing** | HSV color masking on traffic light ROI + stop-line geometric threshold |
 | **Stop-Line Encroachment** | Bounding box intersection ratio against configurable stop-line Y coordinate |
 | **Wrong-Side Driving** | Frame bisection with traffic flow direction configuration (Keep Left / Keep Right) |
-| **Illegal Parking** | Road-edge proximity heuristic + admin-configured No-Parking Zone polygons |
+| **Illegal Parking** | Expanded Proximity Heuristic: Uses a 35% road-edge threshold and verifies no pedestrians are nearby before flagging. |
 
 ### 🏛️ Full Enforcement Workflow
 - **Officer Moderation Panel** — Review, approve, or dismiss flagged incidents from a slide-out drawer
