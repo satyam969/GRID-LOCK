@@ -197,13 +197,16 @@ class ViolationEngine:
 
     def _is_rider(self, person: Dict, moto_box: Dict) -> bool:
         """Determines if a detected person is RIDING (not near) a motorcycle."""
-        person_box = person["bbox"]
-
-        # Simple bounding box intersection (Intersection over Person Area)
-        # If the person bounding box overlaps with the motorcycle bounding box by > 20%
-        # they are highly likely a rider.
+        pb = person["bbox"]
         
-        px1, py1, px2, py2 = person_box["x1"], person_box["y1"], person_box["x2"], person_box["y2"]
+        # Expand person box by 20% to be extremely forgiving for demo
+        pw = pb["x2"] - pb["x1"]
+        ph = pb["y2"] - pb["y1"]
+        px1 = pb["x1"] - (pw * 0.2)
+        py1 = pb["y1"] - (ph * 0.2)
+        px2 = pb["x2"] + (pw * 0.2)
+        py2 = pb["y2"] + (ph * 0.2)
+        
         mx1, my1, mx2, my2 = moto_box["x1"], moto_box["y1"], moto_box["x2"], moto_box["y2"]
         
         ix1 = max(px1, mx1)
@@ -213,7 +216,7 @@ class ViolationEngine:
         
         inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
         
-        # Extremely forgiving heuristic for demo: Any overlap means they are a rider
+        # Any expanded overlap means they are a rider
         if inter_area > 0:
             return True
         return False
@@ -276,9 +279,11 @@ class ViolationEngine:
     ) -> List[Dict]:
         """Count persons per motorcycle using already-fetched person detections."""
         violations = []
+        logger.info(f"Triple riding check: {len(motorcycles)} motos, {len(persons)} persons in frame")
         for moto in motorcycles:
             riders = [p for p in persons if self._is_rider(p, moto["bbox"])]
             count = len(riders)
+            logger.info(f"Moto at {moto['bbox']} has {count} riders.")
             if count >= settings.TRIPLE_RIDING_PERSON_COUNT:
                 violations.append({
                     "violation_type": ViolationType.TRIPLE_RIDING,
