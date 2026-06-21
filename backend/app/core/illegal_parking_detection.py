@@ -36,7 +36,7 @@ def check_illegal_parking(
     img_shape: Tuple[int, int],
     no_parking_zones: Optional[List[Dict]] = None,
     person_proximity_threshold: float = 120.0,
-    edge_percentage: float = 0.15,
+    edge_percentage: float = 0.35,
 ) -> List[Dict]:
     """
     Detect illegally parked vehicles.
