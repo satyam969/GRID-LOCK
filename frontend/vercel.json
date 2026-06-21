@@ -5,6 +5,14 @@
       "destination": "https://satdev-96-trafficguard-ai.hf.space/api/:match*"
     },
     {
+      "source": "/annotated/:match*",
+      "destination": "https://satdev-96-trafficguard-ai.hf.space/annotated/:match*"
+    },
+    {
+      "source": "/uploads/:match*",
+      "destination": "https://satdev-96-trafficguard-ai.hf.space/uploads/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
