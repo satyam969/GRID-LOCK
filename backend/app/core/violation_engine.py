@@ -280,6 +280,24 @@ class ViolationEngine:
         """Count persons per motorcycle using already-fetched person detections."""
         violations = []
         logger.info(f"Triple riding check: {len(motorcycles)} motos, {len(persons)} persons in frame")
+        
+        # For our use-case, if there is exactly 1 motorcycle, we map all detected persons to it
+        # because passengers sitting far back or standing often get completely disjoint bounding boxes.
+        if len(motorcycles) == 1:
+            moto = motorcycles[0]
+            count = len(persons)
+            logger.info(f"Single moto fallback: assigned all {count} persons to it.")
+            if count >= settings.TRIPLE_RIDING_PERSON_COUNT:
+                violations.append({
+                    "violation_type": ViolationType.TRIPLE_RIDING,
+                    "confidence": min(0.95, 0.70 + count * 0.05),
+                    "severity": self.compute_severity(ViolationType.TRIPLE_RIDING, min(0.95, 0.70 + count * 0.05)),
+                    "description": f"{count} persons detected on motorcycle",
+                    "bbox": moto["bbox"],
+                    "person_count": count,
+                })
+            return violations
+
         for moto in motorcycles:
             riders = [p for p in persons if self._is_rider(p, moto["bbox"])]
             count = len(riders)
