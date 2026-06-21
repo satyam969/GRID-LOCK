@@ -128,9 +128,21 @@ class ViolationEngine:
         # ── Triple riding (uses pose results already fetched) ──────────────
         if motorcycles:
             pose_persons = [p for p in pose_detections if p.get("class_id") == 0]
-            person_source = pose_persons if len(pose_persons) > len(persons) else persons
-            triple_violations = self._check_triple_riding_from_persons(motorcycles, person_source)
-            violations.extend(triple_violations)
+            
+            # Check Triple Riding against the General model's persons
+            triple_v1 = self._check_triple_riding_from_persons(motorcycles, persons)
+            
+            # Check Triple Riding against the Pose model's persons (often better at occluded passengers)
+            triple_v2 = self._check_triple_riding_from_persons(motorcycles, pose_persons)
+            
+            # Use whichever detected more violations (or higher person_count)
+            v1_count = sum(v.get("person_count", 0) for v in triple_v1)
+            v2_count = sum(v.get("person_count", 0) for v in triple_v2)
+            
+            if v2_count > v1_count:
+                violations.extend(triple_v2)
+            else:
+                violations.extend(triple_v1)
 
         # ── Phase 3: Rule-based checks (no model inference) ───────────────
         traffic_lights = [d for d in general_detections if d["class_id"] == 9]
@@ -304,6 +316,8 @@ class ViolationEngine:
                 
                 # Threshold: person must be within 1.5x the width or height of the motorcycle
                 threshold = max(mw, mh) * 1.5
+                
+                logger.info(f"Person at {pb} -> Moto {i} dist={dist:.1f}, threshold={threshold:.1f}")
                 
                 if dist < min_dist and dist <= threshold:
                     min_dist = dist
