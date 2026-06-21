@@ -1,11 +1,13 @@
 """
 Violation Engine — Core business logic for detecting each violation type.
 Uses pre-trained model outputs + geometric/rule-based reasoning.
+Models are run in parallel using ThreadPoolExecutor for maximum CPU throughput.
 """
 import logging
 import numpy as np
 import cv2
 from typing import List, Dict, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.config import settings
 from app.core.detector import Detector, detector
@@ -15,6 +17,9 @@ from app.core.illegal_parking_detection import check_illegal_parking
 from app.core.wrong_side_detection import check_wrong_side_driving
 
 logger = logging.getLogger(__name__)
+
+# Shared thread pool — reused across requests (avoids thread creation overhead)
+_THREAD_POOL = ThreadPoolExecutor(max_workers=4)
 
 
 
@@ -65,75 +70,93 @@ class ViolationEngine:
     ) -> Dict:
         """
         Full analysis pipeline for one image.
-        Returns structured result with all detected violations.
+
+        Phase 1 (sequential): General detection — must run first to know
+                              which vehicle types are present.
+        Phase 2 (parallel):   Pose, helmet, seatbelt run concurrently
+                              using a shared ThreadPoolExecutor.
+        Phase 3 (sequential): Rule-based violation checks (no model needed).
         """
         h, w = img.shape[:2]
         violations = []
         metadata = {}
 
-        # ── Step 1: General detection (vehicles + persons) ─────────────────
+        # ── Phase 1: General detection (vehicles + persons) ───────────────
         general_detections = self.det.detect_vehicles_and_persons(img)
         vehicles = [d for d in general_detections if d["class_id"] in self.det.VEHICLE_CLASS_IDS]
-        persons = [d for d in general_detections if d["class_id"] == self.det.PERSON_CLASS_ID]
+        persons  = [d for d in general_detections if d["class_id"] == self.det.PERSON_CLASS_ID]
         motorcycles = [d for d in vehicles if d["class_id"] == self.det.MOTORCYCLE_CLASS_ID]
-        cars = [d for d in vehicles if d["class_id"] == self.det.CAR_CLASS_ID]
+        cars        = [d for d in vehicles if d["class_id"] == self.det.CAR_CLASS_ID]
 
         metadata["general_detections"] = general_detections
         metadata["vehicle_count"] = len(vehicles)
-        metadata["person_count"] = len(persons)
+        metadata["person_count"]  = len(persons)
 
-        # Determine dominant vehicle type
         vehicle_type = self._get_dominant_vehicle_type(vehicles)
 
-        # ── Step 2: Helmet detection (motorcycles only) ────────────────────
-        if motorcycles:
-            helmet_violations = self._check_helmet(img, motorcycles, persons)
-            violations.extend(helmet_violations)
-            metadata["helmet_checks"] = len(helmet_violations)
+        # ── Phase 2: Parallel model inference ─────────────────────────────
+        # Submit all relevant model calls concurrently; collect results
+        futures = {}
 
-        # ── Step 3: Triple riding (motorcycles only) ───────────────────────
         if motorcycles:
-            triple_violations = self._check_triple_riding(img, motorcycles, persons)
+            futures["pose"]   = _THREAD_POOL.submit(self.det.detect_poses, img)
+            futures["helmet"] = _THREAD_POOL.submit(self._check_helmet, img, motorcycles, persons)
+
+        if cars or any(d["class_id"] in {5, 7} for d in vehicles) or persons:
+            futures["seatbelt"] = _THREAD_POOL.submit(self._check_seatbelt, img, vehicles, persons)
+
+        # Collect parallel results (block until all done)
+        pose_detections = []
+        if "pose" in futures:
+            try:
+                pose_detections = futures["pose"].result()
+            except Exception as e:
+                logger.warning(f"Pose model failed: {e}")
+
+        if "helmet" in futures:
+            try:
+                violations.extend(futures["helmet"].result())
+            except Exception as e:
+                logger.warning(f"Helmet check failed: {e}")
+
+        if "seatbelt" in futures:
+            try:
+                violations.extend(futures["seatbelt"].result())
+            except Exception as e:
+                logger.warning(f"Seatbelt check failed: {e}")
+
+        # ── Triple riding (uses pose results already fetched) ──────────────
+        if motorcycles:
+            pose_persons = [p for p in pose_detections if p.get("class_id") == 0]
+            person_source = pose_persons if len(pose_persons) > len(persons) else persons
+            triple_violations = self._check_triple_riding_from_persons(motorcycles, person_source)
             violations.extend(triple_violations)
 
-        # ── Step 4: Seatbelt (cars/trucks/buses/persons) ───────────────────
-        if cars or any(d["class_id"] in {5, 7} for d in vehicles) or persons:
-            seatbelt_violations = self._check_seatbelt(img, vehicles, persons)
-            violations.extend(seatbelt_violations)
-
-        # ── Step 5: Stop-line violation (IMPROVED) ─────────────────────────
+        # ── Phase 3: Rule-based checks (no model inference) ───────────────
         traffic_lights = [d for d in general_detections if d["class_id"] == 9]
-        
-        # Filter vehicles by flow_direction for stop line and red light
-        # If flow is left, only check left half of the road (x < w/2)
-        # If flow is right, only check right half of the road (x > w/2)
+
+        # Filter vehicles by flow direction
         target_vehicles = []
         for v in vehicles:
             v_cx = (v['bbox']['x1'] + v['bbox']['x2']) / 2
-            if flow_direction == 'left' and v_cx > w / 2:
-                continue # Oncoming traffic on the right
-            if flow_direction == 'right' and v_cx < w / 2:
-                continue # Oncoming traffic on the left
+            if flow_direction == 'left'  and v_cx > w / 2: continue
+            if flow_direction == 'right' and v_cx < w / 2: continue
             target_vehicles.append(v)
 
+        # Stop-line violation
         if check_stop_line and target_vehicles:
             stop_y = (stop_line_y_ratio or settings.STOP_LINE_Y_RATIO) * h
-
-            # Check traffic light state first
             light_color = None
             if traffic_lights:
                 for tl in traffic_lights:
                     light_color = detect_traffic_light_color(img, tl['bbox'])
                     if light_color:
                         break
-
-            # Only flag if light is RED, YELLOW, or not detected
-            # If GREEN -> vehicles SHOULD be past the line -> no violation
             if light_color != 'GREEN':
                 stop_violations = self._check_stop_line(target_vehicles, stop_y, h, w, flow_direction)
                 violations.extend(stop_violations)
 
-        # ── Step 6: Red-light violation ────────────────────────────────────
+        # Red-light violation
         if traffic_lights and target_vehicles:
             stop_y = (stop_line_y_ratio or settings.STOP_LINE_Y_RATIO) * h
             red_violations = check_red_light_violation(
@@ -141,11 +164,11 @@ class ViolationEngine:
                 traffic_light_detections=traffic_lights,
                 stop_line_y=stop_y,
                 img=img,
-                flow_direction=flow_direction
+                flow_direction=flow_direction,
             )
             violations.extend(red_violations)
 
-        # ── Step 7: Illegal Parking ────────────────────────────────────────
+        # Illegal parking
         if detect_parking:
             parking_violations = check_illegal_parking(
                 all_detections=general_detections,
@@ -154,21 +177,20 @@ class ViolationEngine:
             )
             violations.extend(parking_violations)
 
-        # ── Step 8: Wrong-Side Driving ─────────────────────────────────────
-        wrong_side_config = {
-            'flow_direction': flow_direction,
-            'lane_boundary_x': 0.5,
-        }
+        # Wrong-side driving
         if flow_direction != 'none':
-            ws_violations = check_wrong_side_driving(general_detections, img.shape, wrong_side_config)
+            ws_violations = check_wrong_side_driving(
+                general_detections, img.shape,
+                {'flow_direction': flow_direction, 'lane_boundary_x': 0.5}
+            )
             violations.extend(ws_violations)
 
         return {
-            "violations": violations,
-            "vehicle_type": vehicle_type,
-            "person_count": len(persons),
+            "violations":    violations,
+            "vehicle_type":  vehicle_type,
+            "person_count":  len(persons),
             "all_detections": general_detections,
-            "metadata": metadata,
+            "metadata":      metadata,
         }
 
     # ── Helmet Detection ────────────────────────────────────────────────────
@@ -249,21 +271,14 @@ class ViolationEngine:
 
     # ── Triple Riding ───────────────────────────────────────────────────────
 
-    def _check_triple_riding(
-        self, img: np.ndarray, motorcycles: List[Dict], persons: List[Dict]
+    def _check_triple_riding_from_persons(
+        self, motorcycles: List[Dict], persons: List[Dict]
     ) -> List[Dict]:
-        """Count persons associated with each motorcycle."""
+        """Count persons per motorcycle using already-fetched person detections."""
         violations = []
-
-        # Use whichever model detected MORE people to prevent false negatives
-        pose_dets = self.det.detect_poses(img)
-        pose_persons = [p for p in pose_dets if p.get("class_id") == 0]
-        person_source = pose_persons if len(pose_persons) > len(persons) else persons
-
         for moto in motorcycles:
-            riders = [p for p in person_source if self._is_rider(p, moto["bbox"])]
+            riders = [p for p in persons if self._is_rider(p, moto["bbox"])]
             count = len(riders)
-
             if count >= settings.TRIPLE_RIDING_PERSON_COUNT:
                 violations.append({
                     "violation_type": ViolationType.TRIPLE_RIDING,
@@ -273,8 +288,8 @@ class ViolationEngine:
                     "bbox": moto["bbox"],
                     "person_count": count,
                 })
-
         return violations
+
 
     # ── Seatbelt Detection ──────────────────────────────────────────────────
 

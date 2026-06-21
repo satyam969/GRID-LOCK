@@ -160,7 +160,7 @@ class Detector:
         model = self.registry.get("helmet")
         if model is None:
             return []
-        results = model(img, conf=settings.CONF_HELMET, iou=settings.NMS_IOU, imgsz=416, half=True, verbose=False)
+        results = model(img, conf=settings.CONF_HELMET, iou=settings.NMS_IOU, imgsz=416, verbose=False)
         return self._parse_results(results[0])
 
     def detect_seatbelts(self, img: np.ndarray) -> List[Dict]:
@@ -168,7 +168,7 @@ class Detector:
         model = self.registry.get("seatbelt")
         if model is None:
             return []
-        results = model(img, conf=settings.CONF_SEATBELT, iou=settings.NMS_IOU, imgsz=416, half=True, verbose=False)
+        results = model(img, conf=settings.CONF_SEATBELT, iou=settings.NMS_IOU, imgsz=416, verbose=False)
         return self._parse_results(results[0])
 
     def detect_license_plate(self, img: np.ndarray) -> List[Dict]:
