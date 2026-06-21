@@ -24,6 +24,8 @@ export default function Analyze() {
   // Options
   const [enhanceContrast, setEnhanceContrast] = useState(false)
   const [checkStopLine, setCheckStopLine] = useState(false)
+  const [detectParking, setDetectParking] = useState(true)
+  const [flowDirection, setFlowDirection] = useState('none')
   const [cameraId, setCameraId] = useState('CAM_DOWNTOWN_04')
 
   // Results
@@ -66,6 +68,8 @@ export default function Analyze() {
       const data = await analyzeImage(file, {
         enhance_contrast: enhanceContrast,
         check_stop_line: checkStopLine,
+        detect_parking: detectParking,
+        flow_direction: flowDirection,
         camera_id: cameraId
       })
       setResult(data)
@@ -145,6 +149,35 @@ export default function Analyze() {
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Detect encroachment over crossing boundaries</div>
               </div>
             </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: '0.85rem' }}>
+              <input 
+                type="checkbox" 
+                checked={detectParking} 
+                onChange={e => setDetectParking(e.target.checked)}
+                disabled={loading}
+                style={{ width: 16, height: 16, accentColor: 'var(--amber)' }}
+              />
+              <div>
+                <div>Detect Illegal Parking</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Flags vehicles at road edges with no driver nearby</div>
+              </div>
+            </label>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+              <label style={{ fontSize: '0.85rem' }}>Traffic Flow Direction</label>
+              <select 
+                value={flowDirection} 
+                onChange={(e) => setFlowDirection(e.target.value)}
+                disabled={loading}
+                className="input"
+                style={{ fontSize: '0.85rem', padding: '6px 12px' }}
+              >
+                <option value="none">Wrong-Side: Off</option>
+                <option value="right">Expected: Keep Right</option>
+                <option value="left">Expected: Keep Left</option>
+              </select>
+            </div>
           </div>
 
           <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)' }}>

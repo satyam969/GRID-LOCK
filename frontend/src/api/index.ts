@@ -71,12 +71,14 @@ export interface AnalyticsSummary {
 
 export const analyzeImage = async (
   file: File,
-  options?: { enhance_contrast?: boolean; check_stop_line?: boolean; camera_id?: string }
+  options?: { enhance_contrast?: boolean; check_stop_line?: boolean; detect_parking?: boolean; flow_direction?: string; camera_id?: string }
 ): Promise<AnalysisResult> => {
   const form = new FormData()
   form.append('file', file)
   if (options?.enhance_contrast !== undefined) form.append('enhance_contrast', String(options.enhance_contrast))
   if (options?.check_stop_line !== undefined) form.append('check_stop_line', String(options.check_stop_line))
+  if (options?.detect_parking !== undefined) form.append('detect_parking', String(options.detect_parking))
+  if (options?.flow_direction !== undefined) form.append('flow_direction', options.flow_direction)
   if (options?.camera_id) form.append('camera_id', options.camera_id)
   const { data } = await api.post<AnalysisResult>('/analyze/image', form)
   return data
