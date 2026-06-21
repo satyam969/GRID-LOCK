@@ -33,9 +33,9 @@ export default function CameraManagement() {
     e.preventDefault()
     
     // Parse coordinates
-    const payload = { ...formData }
-    if (payload.latitude === '') delete payload.latitude; else payload.latitude = parseFloat(payload.latitude as string);
-    if (payload.longitude === '') delete payload.longitude; else payload.longitude = parseFloat(payload.longitude as string);
+    const payload: any = { ...formData }
+    if (payload.latitude === '') delete payload.latitude; else payload.latitude = parseFloat(payload.latitude);
+    if (payload.longitude === '') delete payload.longitude; else payload.longitude = parseFloat(payload.longitude);
     
     createMutation.mutate(payload)
   }
