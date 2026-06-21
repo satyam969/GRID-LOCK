@@ -277,31 +277,44 @@ class ViolationEngine:
     def _check_triple_riding_from_persons(
         self, motorcycles: List[Dict], persons: List[Dict]
     ) -> List[Dict]:
-        """Count persons per motorcycle using already-fetched person detections."""
+        """Count persons per motorcycle using robust center-point distance mapping."""
         violations = []
         logger.info(f"Triple riding check: {len(motorcycles)} motos, {len(persons)} persons in frame")
         
-        # For our use-case, if there is exactly 1 motorcycle, we map all detected persons to it
-        # because passengers sitting far back or standing often get completely disjoint bounding boxes.
-        if len(motorcycles) == 1:
-            moto = motorcycles[0]
-            count = len(persons)
-            logger.info(f"Single moto fallback: assigned all {count} persons to it.")
-            if count >= settings.TRIPLE_RIDING_PERSON_COUNT:
-                violations.append({
-                    "violation_type": ViolationType.TRIPLE_RIDING,
-                    "confidence": min(0.95, 0.70 + count * 0.05),
-                    "severity": self.compute_severity(ViolationType.TRIPLE_RIDING, min(0.95, 0.70 + count * 0.05)),
-                    "description": f"{count} persons detected on motorcycle",
-                    "bbox": moto["bbox"],
-                    "person_count": count,
-                })
-            return violations
+        # Track how many riders are assigned to each motorcycle index
+        moto_rider_counts = {i: 0 for i in range(len(motorcycles))}
 
-        for moto in motorcycles:
-            riders = [p for p in persons if self._is_rider(p, moto["bbox"])]
-            count = len(riders)
-            logger.info(f"Moto at {moto['bbox']} has {count} riders.")
+        for person in persons:
+            pb = person["bbox"]
+            pcx = (pb["x1"] + pb["x2"]) / 2
+            pcy = (pb["y1"] + pb["y2"]) / 2
+
+            closest_moto_idx = -1
+            min_dist = float('inf')
+
+            for i, moto in enumerate(motorcycles):
+                mb = moto["bbox"]
+                mcx = (mb["x1"] + mb["x2"]) / 2
+                mcy = (mb["y1"] + mb["y2"]) / 2
+                mw = mb["x2"] - mb["x1"]
+                mh = mb["y2"] - mb["y1"]
+
+                # Euclidean distance
+                dist = ((pcx - mcx) ** 2 + (pcy - mcy) ** 2) ** 0.5
+                
+                # Threshold: person must be within 1.5x the width or height of the motorcycle
+                threshold = max(mw, mh) * 1.5
+                
+                if dist < min_dist and dist <= threshold:
+                    min_dist = dist
+                    closest_moto_idx = i
+            
+            if closest_moto_idx != -1:
+                moto_rider_counts[closest_moto_idx] += 1
+
+        for i, count in moto_rider_counts.items():
+            moto = motorcycles[i]
+            logger.info(f"Moto at {moto['bbox']} has {count} assigned riders.")
             if count >= settings.TRIPLE_RIDING_PERSON_COUNT:
                 violations.append({
                     "violation_type": ViolationType.TRIPLE_RIDING,
@@ -311,6 +324,7 @@ class ViolationEngine:
                     "bbox": moto["bbox"],
                     "person_count": count,
                 })
+
         return violations
 
 
