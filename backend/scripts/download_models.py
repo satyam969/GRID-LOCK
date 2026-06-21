@@ -159,7 +159,7 @@ def verify_models():
         print("  [!] ultralytics not installed, skipping verification")
         return
 
-    for filename in list(MODEL_SOURCES.keys()) + OFFICIAL_MODELS:
+    for filename in list(MODEL_SOURCES.keys()):
         # Prefer models_weights/, fall back to root
         path = settings.MODELS_DIR / filename
         if not path.exists():
