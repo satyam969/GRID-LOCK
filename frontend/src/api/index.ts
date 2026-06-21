@@ -127,14 +127,13 @@ export const fetchByType = async () => {
   const { data } = await api.get('/analytics/by-type')
   return data
 }
-
 export const fetchMetrics = async () => {
   const { data } = await api.get('/analytics/metrics')
   return data
 }
 
 export const fetchHealth = async () => {
-  const { data } = await axios.get('/health')
+  const { data } = await axios.get('https://satdev-96-trafficguard-ai.hf.space/health')
   return data
 }
 
